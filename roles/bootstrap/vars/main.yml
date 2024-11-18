@@ -1,0 +1,7 @@
+---
+# vars file for discourse bootstrap 
+
+user_name: "azureuser"
+discourse_repo_url: "https://github.com/discourse/discourse.git"
+git_branch: "main"  
+discourse_path: "/home/azureuser/discourse"

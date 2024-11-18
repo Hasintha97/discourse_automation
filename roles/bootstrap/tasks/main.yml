@@ -1,0 +1,38 @@
+---
+
+- name: Clone the discourse repository
+  ansible.builtin.git:
+    repo: "{{ discourse_repo_url }}"
+    dest: "{{ discourse_path }}"
+    version: "{{ git_branch }}"
+    force: yes
+  become: yes
+  become_user: "{{ user_name }}"
+
+- name: Install the needed gems
+  ansible.builtin.shell:
+    cmd: |
+      source ~/.bashrc
+      bundle install
+    chdir: "{{ discourse_path }}"
+  become: yes
+  become_user: "{{ user_name }}"
+
+- name: Install the JS dependencies
+  ansible.builtin.shell:
+    cmd: |
+      source ~/.bashrc
+      pnpm install
+    chdir: "{{ discourse_path }}"
+  become: yes
+  become_user: "{{ user_name }}"
+
+- name: Create and migrate databases
+  ansible.builtin.shell:
+    cmd: |
+      bin/rails db:create
+      bin/rails db:migrate
+      RAILS_ENV=test bin/rails db:create db:migrate
+    chdir: "{{ discourse_path }}"
+  become: yes
+  become_user: "{{ user_name }}"

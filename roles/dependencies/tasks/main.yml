@@ -1,0 +1,379 @@
+---
+- name: Ensure bashrc file exists
+  ansible.builtin.file:
+    path: "{{ user_path }}/.bashrc"
+    state: touch
+
+- name: Update apt packages
+  ansible.builtin.apt:
+    update_cache: yes
+
+- name: Install Git
+  ansible.builtin.apt:
+    name: git
+    state: present
+  tags:
+    - git  
+
+- name: Install build-essential
+  ansible.builtin.apt:
+    name: build-essential
+    state: present
+  tags:
+    - build-essential 
+
+- name: Install libraries for gem dependencies
+  ansible.builtin.apt:
+    name:
+      - libxslt1-dev
+      - libcurl4-openssl-dev
+      - libksba8
+      - libksba-dev
+      - libreadline-dev
+      - libssl-dev
+      - zlib1g-dev
+      - libsnappy-dev
+      - libyaml-dev
+      - acl  
+    state: present
+  tags:
+    - gem-dependencies 
+
+- name: Install sqlite3
+  ansible.builtin.apt:
+    name:
+      - libsqlite3-dev
+      - sqlite3
+    state: present
+  tags:
+    - sqlite3  
+
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    name:
+      - postgresql
+      - postgresql-server-dev-all
+      - postgresql-contrib
+      - libpq-dev
+    state: present
+  tags:
+    - postgresql    
+
+- name: Start PostgreSQL service
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: yes
+
+- name: Check if PostgreSQL user exists
+  become: yes
+  become_user: postgres
+  command: psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='{{ user_name }}';"
+  register: user_check
+  changed_when: false
+  failed_when: false
+    
+      
+- name: Create PostgreSQL user
+  command: createuser -s {{ user_name }}
+  become: yes
+  become_method: sudo  
+  become_user: postgres
+  when: user_check.stdout.strip() == ""
+
+- name: Install curl
+  ansible.builtin.apt:
+    name: curl
+    state: present
+  tags:
+    - curl     
+
+# Redis installation
+- name: Install Redis dependencies and download source
+  ansible.builtin.shell:
+    cmd: |
+      cd /tmp
+      wget https://download.redis.io/redis-{{ redis_version }}.tar.gz
+      tar -xzvf redis-{{ redis_version }}.tar.gz
+      cd redis-{{ redis_version }}
+      make
+      make install
+  args:
+    creates: /usr/local/bin/redis-server    
+  tags:
+    - redis      
+
+- name: Clean up Redis source files
+  ansible.builtin.file:
+    path: "/tmp/redis-stable.tar.gz"
+    state: absent
+  tags:
+    - redis
+
+- name: Remove Redis source directory
+  ansible.builtin.file:
+    path: "/tmp/redis-stable"
+    state: absent
+  tags:
+    - redis
+
+- name: Ensure Redis system user exists
+  ansible.builtin.user:
+    name: redis
+    system: yes
+    create_home: no
+  tags:
+    - redis      
+
+- name: Ensure Redis group exists
+  ansible.builtin.group:
+    name: redis
+    state: present
+  tags:
+    - redis
+
+- name: Create required Redis directories  
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: redis
+    group: redis
+    mode: '0755'
+  with_items:
+    - /var/log/redis
+    - /var/lib/redis
+    - /etc/redis      
+  tags:
+    - redis
+
+- name: Create Redis configuration file
+  ansible.builtin.copy:
+    dest: /etc/redis/redis.conf
+    content: |
+      bind 127.0.0.1
+      protected-mode no
+      port 6379
+      dir /var/lib/redis
+      dbfilename dump.rdb
+      save 900 1
+      save 300 10
+      save 60 10000
+      logfile /var/log/redis/redis-server.log
+      loglevel debug
+    owner: redis
+    group: redis
+    mode: '0644'
+  tags:
+    - redis
+
+- name: Create Redis systemd service file
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/redis-server.service
+    content: |
+      [Unit]
+      Description=redis in-memory data store
+      After=network.target
+
+      [Service]
+      User=redis
+      Group=redis
+      ExecStart=/usr/local/bin/redis-server /etc/redis/redis.conf
+      ExecStop=/usr/local/bin/redis-cli shutdown
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+    owner: root
+    group: root
+    mode: '0644'
+  tags:
+    - redis
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: yes
+  tags:
+    - redis
+
+- name: Enable and start Redis service
+  ansible.builtin.systemd:
+    name: redis-server
+    state: started
+    enabled: yes
+  tags:
+    - redis
+
+- name: Check Redis server status
+  ansible.builtin.command:
+    cmd: redis-cli ping
+  register: redis_ping
+  retries: 3
+  delay: 5
+  until: redis_ping.stdout == "PONG"
+  tags:
+    - redis
+
+# Installing ImageMagick
+- name: Download and install ImageMagick
+  ansible.builtin.shell:
+    cmd: |
+      wget {{ imagemagick_install_script_url }}
+      chmod +x install-imagemagick
+      ./install-imagemagick
+  args:
+    creates: /usr/local/bin/convert
+  tags:
+    - imagemagick
+
+#"Installing image utilities    
+
+- name: Install image utilities
+  ansible.builtin.apt:
+    name:
+      - advancecomp
+      - gifsicle
+      - jpegoptim
+      - libjpeg-progs
+      - optipng
+      - pngcrush
+      - pngquant
+      - jhead
+    state: present
+  tags:
+    - image_utilities
+
+- name: Download oxipng
+  ansible.builtin.get_url:
+    url: https://github.com/shssoichiro/oxipng/releases/download/v8.0.0/oxipng-8.0.0-x86_64-unknown-linux-musl.tar.gz
+    dest: /tmp/oxipng-8.0.0-x86_64-unknown-linux-musl.tar.gz
+  tags:
+    - oxipng    
+
+- name: Install oxipng
+  ansible.builtin.shell:
+    cmd: |
+      tar -xzvf /tmp/oxipng-8.0.0-x86_64-unknown-linux-musl.tar.gz -C /tmp
+      cp /tmp/oxipng-8.0.0-x86_64-unknown-linux-musl/oxipng /usr/local/bin
+      rm -rf /tmp/oxipng-8.0.0-x86_64-unknown-linux-musl /tmp/oxipng-8.0.0-x86_64-unknown-linux-musl.tar.gz
+  args:
+    creates: /usr/local/bin/oxipng
+  tags:
+    - oxipng
+
+# rbenv installation
+
+- name: Ensure rbenv is installed
+  ansible.builtin.shell:
+    cmd: |
+      if [ ! -d "{{ user_path }}/.rbenv" ]; then
+        echo "Installing rbenv ..."
+        git clone https://github.com/rbenv/rbenv.git {{ user_path }}/.rbenv
+        if ! grep -qs "rbenv init" ~/.bashrc; then
+          echo 'export PATH="{{ user_path }}/.rbenv/bin:$PATH"' >> ~/.bashrc
+          echo 'eval "$(rbenv init - --no-rehash)"' >> ~/.bashrc
+        fi
+        export PATH="{{ user_path }}/.rbenv/bin:$PATH"
+        eval "$(rbenv init -)"
+      fi
+    creates: "{{ user_path }}/.rbenv"
+  become: yes
+  become_user: "{{ user_name }}"      
+  tags:
+    - rbenv
+
+- name: Ensure ruby-build is installed
+  ansible.builtin.shell:
+    cmd: |
+      if [ ! -d "{{ user_path }}/.rbenv/plugins/ruby-build" ]; then
+        echo "Installing ruby-build ..."
+        git clone https://github.com/rbenv/ruby-build.git {{ user_path }}/.rbenv/plugins/ruby-build
+      fi
+    creates: "{{ user_path }}/.rbenv/plugins/ruby-build"
+  become: yes
+  become_user: "{{ user_name }}"      
+  tags:
+    - rbenv
+
+# Install Ruby version
+
+- name: Install Ruby version with rbenv
+  ansible.builtin.shell:
+    cmd: |
+      echo "Installing Ruby {{ ruby_version }} ..."
+      export PATH="{{ user_path }}/.rbenv/bin:$PATH"
+      source {{ user_path }}/.profile
+      eval "$(rbenv init -)"
+      rbenv install {{ ruby_version }}
+    creates: "{{ user_path }}/.rbenv/versions/{{ ruby_version }}"
+  become: yes
+  become_user: "{{ user_name }}"      
+  tags:
+    - ruby
+
+- name: Set Ruby version as global default
+  ansible.builtin.shell:
+    cmd: |
+      log_info "Setting {{ ruby_version }} as global default Ruby ..."
+      rbenv global {{ ruby_version }}
+      rbenv rehash
+  when: ruby_version is defined
+  become: yes
+  become_user: "{{ user_name }}"      
+  tags:
+    - ruby
+
+- name: Update Rubygems to the latest version
+  ansible.builtin.shell:
+    cmd: |
+      log_info "Updating to latest Rubygems version ..."
+      gem update --system
+    creates: "{{ user_path }}/.rbenv/versions/{{ ruby_version }}/lib/ruby/gems/*/gems/rubygems-update-*"
+  become: yes
+  become_user: "{{ user_name }}"      
+  tags:
+    - ruby
+
+- name: Install Rails gem
+  community.general.gem:
+    name: rails
+    state: present
+  become: yes
+  become_user: "{{ user_name }}"
+  tags:
+    - ruby
+
+- name: Install Bundler gem
+  community.general.gem:
+    name: bundler
+    state: present
+  become: yes
+  become_user: "{{ user_name }}"      
+  tags:
+    - ruby
+
+# Installing MailHog
+
+- name: Install MailHog
+  ansible.builtin.shell:
+    cmd: |
+      wget -qO /usr/bin/mailhog https://github.com/mailhog/MailHog/releases/download/v1.0.1/MailHog_linux_amd64
+      chmod +x /usr/bin/mailhog
+  args:
+    creates: /usr/local/bin/mailhog
+
+
+# Node.js installation
+- name: Install Node.js
+  ansible.builtin.shell:
+    cmd: |
+      curl -sL https://deb.nodesource.com/setup_{{ node_version }} | bash -
+      apt-get install -y nodejs
+  args:
+    creates: /usr/bin/node
+
+- name: Install svgo pnpm
+  ansible.builtin.shell:
+    cmd: |
+      npm install -g svgo
+      npm install -g pnpm   
+

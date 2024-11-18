@@ -1,0 +1,10 @@
+####
+
+sudo apt update
+apt install python3.10 python3-pip -y
+pip install ansible-core==2.15.12
+
+## The below command needs to be run from user running the ansible playbook
+
+ansible-galaxy collection install community.general
+

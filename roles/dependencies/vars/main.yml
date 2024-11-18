@@ -1,0 +1,13 @@
+---
+# vars file for discourse_dependencies
+
+user_name: "azureuser"
+user_path: "/home/azureuser"
+ansible_version: "2.15.12"
+ruby_version: "3.2.1"
+node_version: "18.x"
+redis_version: "stable"
+oxipng_version: "8.0.0"
+imagemagick_install_script_url: "https://raw.githubusercontent.com/discourse/discourse_docker/main/image/base/install-imagemagick"
+mailhog_version: "v1.0.1"
+
